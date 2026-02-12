@@ -62,18 +62,37 @@ end
 
 math.randomseed(os.time())
 
+-- Lua keywords that should never be obfuscated
+local luaKeywords = {
+    ["and"] = true, ["break"] = true, ["do"] = true, ["else"] = true,
+    ["elseif"] = true, ["end"] = true, ["false"] = true, ["for"] = true,
+    ["function"] = true, ["goto"] = true, ["if"] = true, ["in"] = true,
+    ["local"] = true, ["nil"] = true, ["not"] = true, ["or"] = true,
+    ["repeat"] = true, ["return"] = true, ["then"] = true, ["true"] = true,
+    ["until"] = true, ["while"] = true
+}
+
 -- Obfuscate local variables in code
 function Obfuscator.obfuscateLocals(code)
     local mappings = {}
     
-    -- Find all local variable declarations
-    for localVars in code:gmatch("local%s+([%w_,%s]+)%s*[=\n]") do
+    -- Find all local variable declarations (with assignment)
+    for localVars in code:gmatch("local%s+([%w_,%s]+)%s*=") do
         -- Split by comma to handle multiple declarations
         for varName in localVars:gmatch("([%w_]+)") do
             -- Don't create mappings for Lua keywords
-            if varName ~= "function" and varName ~= "local" and varName ~= "for" and 
-               varName ~= "while" and varName ~= "if" and varName ~= "do" and
-               varName ~= "end" and varName ~= "then" and varName ~= "else" then
+            if not luaKeywords[varName] then
+                if not mappings[varName] then
+                    mappings[varName] = generateRandomName(8)
+                end
+            end
+        end
+    end
+    
+    -- Find local variables without assignment (e.g., local x, y)
+    for localVars in code:gmatch("local%s+([%w_,%s]+)%s*[;\n]") do
+        for varName in localVars:gmatch("([%w_]+)") do
+            if not luaKeywords[varName] then
                 if not mappings[varName] then
                     mappings[varName] = generateRandomName(8)
                 end
@@ -83,8 +102,10 @@ function Obfuscator.obfuscateLocals(code)
     
     -- Also find local functions
     for funcName in code:gmatch("local%s+function%s+([%w_]+)") do
-        if not mappings[funcName] then
-            mappings[funcName] = generateRandomName(8)
+        if not luaKeywords[funcName] then
+            if not mappings[funcName] then
+                mappings[funcName] = generateRandomName(8)
+            end
         end
     end
     
@@ -95,13 +116,14 @@ function Obfuscator.obfuscateLocals(code)
         
         -- Use word boundaries to avoid partial replacements
         code = code:gsub("([^%w_])" .. escapedOriginal .. "([^%w_])", "%1" .. obfuscated .. "%2")
-        -- Handle start of line
+        -- Handle start of string
         code = code:gsub("^" .. escapedOriginal .. "([^%w_])", obfuscated .. "%1")
+        -- Handle start of lines
         code = code:gsub("\n" .. escapedOriginal .. "([^%w_])", "\n" .. obfuscated .. "%1")
-        -- Handle end of line
+        -- Handle end of string
         code = code:gsub("([^%w_])" .. escapedOriginal .. "$", "%1" .. obfuscated)
-        -- Handle lines with just the variable
-        code = code:gsub("^" .. escapedOriginal .. "$", obfuscated)
+        -- Handle end of lines
+        code = code:gsub("([^%w_])" .. escapedOriginal .. "\n", "%1" .. obfuscated .. "\n")
     end
     
     return code, mappings
@@ -150,9 +172,10 @@ function Obfuscator.encryptStrings(code)
     -- Replace strings with function calls
     for strLiteral, idx in pairs(stringMap) do
         local replacement = string.format("%s(%d)", decryptFuncName, idx)
-        -- Escape special pattern characters
+        -- Escape special pattern characters in both pattern and replacement
         local escaped = strLiteral:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-        code = code:gsub(escaped, replacement)
+        -- Use a function to avoid interpreting captures in replacement
+        code = code:gsub(escaped, function() return replacement end)
     end
     
     -- Prepend decryption function
@@ -220,12 +243,14 @@ function Obfuscator.obfuscateGlobals(code, globalMappings)
         
         -- Use word boundaries to avoid partial replacements
         code = code:gsub("([^%w_])" .. escapedOriginal .. "([^%w_])", "%1" .. obfuscated .. "%2")
-        -- Handle start of line
+        -- Handle start of string
         code = code:gsub("^" .. escapedOriginal .. "([^%w_])", obfuscated .. "%1")
-        -- Handle end of line
+        -- Handle start of lines
+        code = code:gsub("\n" .. escapedOriginal .. "([^%w_])", "\n" .. obfuscated .. "%1")
+        -- Handle end of string
         code = code:gsub("([^%w_])" .. escapedOriginal .. "$", "%1" .. obfuscated)
-        -- Handle lines with just the variable
-        code = code:gsub("^" .. escapedOriginal .. "$", obfuscated)
+        -- Handle end of lines
+        code = code:gsub("([^%w_])" .. escapedOriginal .. "\n", "%1" .. obfuscated .. "\n")
     end
     
     return code
