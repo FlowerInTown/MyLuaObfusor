@@ -51,7 +51,8 @@ function Obfuscator.getLuaFiles(path)
     local fileList = {}
     
     -- Validate path - prevent directory traversal and command injection
-    if path:match("%.%.") or not path:match("^[%w%-_/]+$") then
+    -- Allow dots but not .. patterns
+    if path:match("%.%.") or not path:match("^[%w%-_/.]+$") then
         error("Invalid path: contains potentially dangerous characters or directory traversal")
     end
     
@@ -214,14 +215,25 @@ function Obfuscator.collectGlobals(files)
                 end
             end
             
-            -- Find assignments to potential globals (only at start of lines)
-            -- Match assignments on first line
+            -- Find assignments to potential globals (only at start of lines, not table fields)
+            -- Match assignments on first line (not preceded by . or :)
             for varName in code:gmatch("^%s*([%w_]+)%s*=") do
-                globals[varName] = true
+                -- Check it's not a table field assignment
+                local before = code:match("([%.:])" .. varName .. "%s*=")
+                if not before then
+                    globals[varName] = true
+                end
             end
-            -- Match assignments on other lines
-            for varName in code:gmatch("\n%s*([%w_]+)%s*=") do
-                globals[varName] = true
+            -- Match assignments on other lines (not preceded by . or :)
+            for line in code:gmatch("\n([^\n]+)") do
+                local varName = line:match("^%s*([%w_]+)%s*=")
+                if varName then
+                    -- Check the character before the variable name in the context
+                    local beforeMatch = line:match("[%.:]%s*" .. varName .. "%s*=")
+                    if not beforeMatch then
+                        globals[varName] = true
+                    end
+                end
             end
         end
     end
@@ -341,7 +353,7 @@ function Obfuscator.obfuscate(inputPath, outputPath, configPath)
         local outputDir = outputFilePath:match("^(.*/)[^/]+$")
         if outputDir then
             -- Validate directory path before using in shell command
-            if not outputDir:match("%.%.") and outputDir:match("^[%w%-_/]+$") then
+            if not outputDir:match("%.%.") and outputDir:match("^[%w%-_/.]+$") then
                 os.execute("mkdir -p '" .. outputDir:gsub("'", "'\\''") .. "'")
             else
                 print("Error: Invalid output directory path: " .. outputDir)
