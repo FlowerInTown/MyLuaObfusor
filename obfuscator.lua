@@ -23,13 +23,36 @@ function Obfuscator.loadConfig(configPath)
     return chunk()
 end
 
+-- Helper function to escape pattern characters
+local function escapePattern(str)
+    return str:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+end
+
+-- Helper function to replace with word boundaries
+local function replaceWithBoundaries(code, original, replacement)
+    local escapedOriginal = escapePattern(original)
+    
+    -- Use word boundaries to avoid partial replacements
+    code = code:gsub("([^%w_])" .. escapedOriginal .. "([^%w_])", "%1" .. replacement .. "%2")
+    -- Handle start of string
+    code = code:gsub("^" .. escapedOriginal .. "([^%w_])", replacement .. "%1")
+    -- Handle start of lines
+    code = code:gsub("\n" .. escapedOriginal .. "([^%w_])", "\n" .. replacement .. "%1")
+    -- Handle end of string
+    code = code:gsub("([^%w_])" .. escapedOriginal .. "$", "%1" .. replacement)
+    -- Handle end of lines
+    code = code:gsub("([^%w_])" .. escapedOriginal .. "\n", "%1" .. replacement .. "\n")
+    
+    return code
+end
+
 -- Get all Lua files recursively from a directory
 function Obfuscator.getLuaFiles(path)
     local fileList = {}
     
-    -- Validate path - only allow alphanumeric, dash, underscore, slash, and dot
-    if not path:match("^[%w%-%._/]+$") then
-        error("Invalid path: contains potentially dangerous characters")
+    -- Validate path - prevent directory traversal and command injection
+    if path:match("%.%.") or not path:match("^[%w%-_/]+$") then
+        error("Invalid path: contains potentially dangerous characters or directory traversal")
     end
     
     -- Use find command to locate all .lua files
@@ -111,19 +134,7 @@ function Obfuscator.obfuscateLocals(code)
     
     -- Replace all occurrences (simple word boundary replacement)
     for original, obfuscated in pairs(mappings) do
-        -- Escape special pattern characters in the original name
-        local escapedOriginal = original:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-        
-        -- Use word boundaries to avoid partial replacements
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "([^%w_])", "%1" .. obfuscated .. "%2")
-        -- Handle start of string
-        code = code:gsub("^" .. escapedOriginal .. "([^%w_])", obfuscated .. "%1")
-        -- Handle start of lines
-        code = code:gsub("\n" .. escapedOriginal .. "([^%w_])", "\n" .. obfuscated .. "%1")
-        -- Handle end of string
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "$", "%1" .. obfuscated)
-        -- Handle end of lines
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "\n", "%1" .. obfuscated .. "\n")
+        code = replaceWithBoundaries(code, original, obfuscated)
     end
     
     return code, mappings
@@ -172,9 +183,8 @@ function Obfuscator.encryptStrings(code)
     -- Replace strings with function calls
     for strLiteral, idx in pairs(stringMap) do
         local replacement = string.format("%s(%d)", decryptFuncName, idx)
-        -- Escape special pattern characters in both pattern and replacement
-        local escaped = strLiteral:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-        -- Use a function to avoid interpreting captures in replacement
+        -- Escape special pattern characters and use function to avoid capture interpretation
+        local escaped = escapePattern(strLiteral)
         code = code:gsub(escaped, function() return replacement end)
     end
     
@@ -197,19 +207,20 @@ function Obfuscator.collectGlobals(files)
             -- Find function declarations (global functions)
             for funcName in code:gmatch("function%s+([%w_]+)%s*%(") do
                 -- Skip if it's a local function
-                local escapedFuncName = funcName:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+                local escapedFuncName = escapePattern(funcName)
                 local localCheck = code:match("local%s+function%s+" .. escapedFuncName)
                 if not localCheck then
                     globals[funcName] = true
                 end
             end
             
-            -- Find assignments to potential globals (simplified detection)
-            -- Only match at start of line to avoid table keys
-            for varName in code:gmatch("^([%w_]+)%s*=") do
+            -- Find assignments to potential globals (only at start of lines)
+            -- Match assignments on first line
+            for varName in code:gmatch("^%s*([%w_]+)%s*=") do
                 globals[varName] = true
             end
-            for varName in code:gmatch("\n([%w_]+)%s*=") do
+            -- Match assignments on other lines
+            for varName in code:gmatch("\n%s*([%w_]+)%s*=") do
                 globals[varName] = true
             end
         end
@@ -238,19 +249,7 @@ end
 -- Obfuscate global variables
 function Obfuscator.obfuscateGlobals(code, globalMappings)
     for original, obfuscated in pairs(globalMappings) do
-        -- Escape special pattern characters in the original name
-        local escapedOriginal = original:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
-        
-        -- Use word boundaries to avoid partial replacements
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "([^%w_])", "%1" .. obfuscated .. "%2")
-        -- Handle start of string
-        code = code:gsub("^" .. escapedOriginal .. "([^%w_])", obfuscated .. "%1")
-        -- Handle start of lines
-        code = code:gsub("\n" .. escapedOriginal .. "([^%w_])", "\n" .. obfuscated .. "%1")
-        -- Handle end of string
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "$", "%1" .. obfuscated)
-        -- Handle end of lines
-        code = code:gsub("([^%w_])" .. escapedOriginal .. "\n", "%1" .. obfuscated .. "\n")
+        code = replaceWithBoundaries(code, original, obfuscated)
     end
     
     return code
@@ -342,7 +341,7 @@ function Obfuscator.obfuscate(inputPath, outputPath, configPath)
         local outputDir = outputFilePath:match("^(.*/)[^/]+$")
         if outputDir then
             -- Validate directory path before using in shell command
-            if outputDir:match("^[%w%-%._/]+$") then
+            if not outputDir:match("%.%.") and outputDir:match("^[%w%-_/]+$") then
                 os.execute("mkdir -p '" .. outputDir:gsub("'", "'\\''") .. "'")
             else
                 print("Error: Invalid output directory path: " .. outputDir)
