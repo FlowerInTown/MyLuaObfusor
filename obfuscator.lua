@@ -65,8 +65,13 @@ function Obfuscator.obfuscateLocals(code)
     for localVars in code:gmatch("local%s+([%w_,%s]+)%s*[=\n]") do
         -- Split by comma to handle multiple declarations
         for varName in localVars:gmatch("([%w_]+)") do
-            if not mappings[varName] then
-                mappings[varName] = generateRandomName(8)
+            -- Don't create mappings for Lua keywords
+            if varName ~= "function" and varName ~= "local" and varName ~= "for" and 
+               varName ~= "while" and varName ~= "if" and varName ~= "do" and
+               varName ~= "end" and varName ~= "then" and varName ~= "else" then
+                if not mappings[varName] then
+                    mappings[varName] = generateRandomName(8)
+                end
             end
         end
     end
@@ -84,6 +89,7 @@ function Obfuscator.obfuscateLocals(code)
         code = code:gsub("([^%w_])" .. original .. "([^%w_])", "%1" .. obfuscated .. "%2")
         -- Handle start of line
         code = code:gsub("^" .. original .. "([^%w_])", obfuscated .. "%1")
+        code = code:gsub("\n" .. original .. "([^%w_])", "\n" .. obfuscated .. "%1")
         -- Handle end of line
         code = code:gsub("([^%w_])" .. original .. "$", "%1" .. obfuscated)
         -- Handle lines with just the variable
@@ -159,16 +165,20 @@ function Obfuscator.collectGlobals(files)
             
             -- Find function declarations (global functions)
             for funcName in code:gmatch("function%s+([%w_]+)%s*%(") do
-                globals[funcName] = true
+                -- Skip if it's a local function
+                local localCheck = code:match("local%s+function%s+" .. funcName)
+                if not localCheck then
+                    globals[funcName] = true
+                end
             end
             
             -- Find assignments to potential globals (simplified detection)
-            for varName in code:gmatch("([%w_]+)%s*=") do
-                -- Check if it's not a local
-                local context = code:match("local%s+" .. varName .. "%s*=")
-                if not context then
-                    globals[varName] = true
-                end
+            -- Only match at start of line to avoid table keys
+            for varName in code:gmatch("^([%w_]+)%s*=") do
+                globals[varName] = true
+            end
+            for varName in code:gmatch("\n([%w_]+)%s*=") do
+                globals[varName] = true
             end
         end
     end
