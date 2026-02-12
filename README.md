@@ -1,0 +1,2 @@
+# MyLuaObfusor
+obfuse lua files
