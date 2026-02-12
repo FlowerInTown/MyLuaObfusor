@@ -1,0 +1,7 @@
+# Test directories
+test_input/
+test_output/
+
+# Backup files
+*_old.lua
+*_backup.lua
